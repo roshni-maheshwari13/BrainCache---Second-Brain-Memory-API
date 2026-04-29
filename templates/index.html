@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BrainCache</title>
+  <link rel="stylesheet" href="/static/style.css?v=1">
+</head>
+<body>
+
+  <header class="topbar">
+    <div>
+      <div class="title">BrainCache</div>
+      <div class="subtitle">Your Second Brain</div>
+    </div>
+
+    <div class="topActions">
+      <button id="themeToggle" class="themeBtn" type="button">Light</button>
+      <a class="logoutBtn" href="/logout">Logout</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Chat</h2>
+        <span class="hint">Save: any text here</span>
+      </div>
+
+      <div id="chatbox" class="chatbox"></div>
+
+      <div class="composer">
+        <input id="msg" placeholder="Type & press Enter">
+        <button type="button" onclick="sendMsg()">Send</button>
+      </div>
+
+      <div class="actions">
+        <button class="chip" type="button" onclick="loadMemories()">All</button>
+        <button class="chip" type="button" onclick="toggleTagBar()">Tag</button>
+        <button class="chip" type="button" onclick="getSummary()">Summary</button>
+        <button class="chip" type="button" onclick="getCalendar()">Calendar</button>
+      </div>
+
+      <div id="tagBar" class="tagbar hidden">
+        <input id="tagInput" placeholder="Enter tag e.g. general / personal">
+        <button class="mini" type="button" onclick="applyTag()">Apply</button>
+        <button class="mini ghost" type="button" onclick="clearTag()">Clear</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Memories</h2>
+        <div class="memHeadRight">
+          <input id="searchInput" class="searchInput" placeholder="Search memories...">
+          <span class="hint">Edit / Delete from here</span>
+        </div>
+      </div>
+      <div id="cards" class="cards"></div>
+    </section>
+  </main>
+
+  <script src="/static/script.js?v=1"></script>
+</body>
+</html>

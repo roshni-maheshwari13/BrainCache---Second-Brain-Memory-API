@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login - BrainCache</title>
+  <link rel="stylesheet" href="/static/login.css?v=1">
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>BrainCache</h1>
+      <p class="sub">Login or create an account</p>
+
+      <div class="tabs">
+        <button id="tabLogin" class="tab active" type="button">Login</button>
+        <button id="tabSignup" class="tab" type="button">Signup</button>
+      </div>
+
+      <label>Username</label>
+      <input id="username" placeholder="e.g. roshni2005"/>
+
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••"/>
+
+      <button id="submitBtn" class="primary" type="button">Login</button>
+
+      <div id="msgBox" class="msg"></div>
+      <div class="tip">Tip: Signup once, then login.</div>
+    </div>
+  </div>
+
+  <script src="/static/login.js?v=1"></script>
+</body>
+</html>
