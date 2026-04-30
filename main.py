@@ -50,8 +50,8 @@ mem_col   = db["memories"]
 
 # ── Hugging Face API Setup (External AI) ───────────────────────────────────────
 HF_TOKEN = os.getenv("HF_TOKEN")
-# Updated to a more reliable model and correct API endpoint
-API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+# Exact correct URL for embeddings
+API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
 
 def get_embedding(text: str) -> list:
     if not HF_TOKEN:
