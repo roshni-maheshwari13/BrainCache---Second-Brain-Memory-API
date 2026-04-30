@@ -49,25 +49,27 @@ users_col = db["users"]
 mem_col   = db["memories"]
 
 # ── Hugging Face API Setup (External AI) ───────────────────────────────────────
+from huggingface_hub import InferenceClient
+
 HF_TOKEN = os.getenv("HF_TOKEN")
-# Exact correct URL for embeddings
-API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+# Yeh official library khud correct URL aur routing handle karti hai!
+hf_client = InferenceClient(token=HF_TOKEN) if HF_TOKEN else None
 
 def get_embedding(text: str) -> list:
-    if not HF_TOKEN:
+    if not hf_client:
         raise ValueError("HF_TOKEN environment variable is not set in Render!")
     
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    response = requests.post(API_URL, headers=headers, json={"inputs": [text]})
+    # API call using the official client (No manual URLs needed)
+    result = hf_client.feature_extraction(text, model="sentence-transformers/all-MiniLM-L6-v2")
     
-    if response.status_code == 200:
-        result = response.json()
-        # API returns a list inside a list for our text
-        if isinstance(result, list) and len(result) > 0:
-            return result[0]
-        return result
-    else:
-        raise Exception(f"HuggingFace API Error ({response.status_code}): {response.text}")
+    # Convert numpy array to plain list for MongoDB
+    if hasattr(result, "tolist"):
+        result = result.tolist()
+        
+    # Extra safety: flatten the list if it's nested
+    if isinstance(result, list) and len(result) > 0 and isinstance(result[0], list):
+        return result[0]
+    return result
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
 def hash_password(password: str) -> str:
