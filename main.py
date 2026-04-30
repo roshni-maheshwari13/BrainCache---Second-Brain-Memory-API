@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, Body, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from pymongo import MongoClient
@@ -16,37 +17,61 @@ import numpy as np
 from pathlib import Path
 from bson import ObjectId
 
+# ── App setup ──────────────────────────────────────────────────────────────────
 app = FastAPI()
-app.add_middleware(SessionMiddleware, secret_key="change-this-to-a-long-random-secret")
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET", "change-this-to-a-long-random-secret")
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # tighten this to your frontend URL in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-client = MongoClient(os.getenv("MONGO_URI"))
+# ── MongoDB ────────────────────────────────────────────────────────────────────
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI environment variable is not set!")
+
+client = MongoClient(MONGO_URI)
 db = client["secondbrain"]
 users_col = db["users"]
-mem_col = db["memories"]
+mem_col   = db["memories"]
 
+# ── Sentence-transformer model (lazy, thread-safe) ─────────────────────────────
 model = None
 
 def get_model():
     global model
     if model is None:
         from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer("paraphrase-MiniLM-L3-v2")
+        hf_token = os.getenv("HF_TOKEN")          # set this in Render env vars
+        model = SentenceTransformer(
+            "paraphrase-MiniLM-L3-v2",
+            use_auth_token=hf_token if hf_token else False
+        )
     return model
 
+# ── Auth helpers ───────────────────────────────────────────────────────────────
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
-    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
-    return base64.b64encode(salt + dk).decode("utf-8")
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
+    return base64.b64encode(salt + dk).decode()
 
 def verify_password(password: str, stored: str) -> bool:
-    raw = base64.b64decode(stored.encode("utf-8"))
-    salt = raw[:16]
-    old_dk = raw[16:]
-    new_dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
+    raw     = base64.b64decode(stored.encode())
+    salt    = raw[:16]
+    old_dk  = raw[16:]
+    new_dk  = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
     return hmac.compare_digest(old_dk, new_dk)
 
 def get_current_user(request: Request):
@@ -55,6 +80,7 @@ def get_current_user(request: Request):
         raise HTTPException(status_code=401, detail="Login required")
     return user
 
+# ── Text utilities ─────────────────────────────────────────────────────────────
 STOPWORDS = set("""
 a an the is are am was were be been being
 i me my mine you your yours we our ours they their theirs
@@ -80,91 +106,45 @@ def clean_memory_text(text: str) -> str:
 
 def tokens(s: str):
     s = normalize_text(s)
-    out = []
-    for t in s.split():
-        if not t:
-            continue
-        if t in STOPWORDS:
-            continue
-        if t.startswith("#"):
-            continue
-        out.append(t)
-    return out
+    return [t for t in s.split() if t and t not in STOPWORDS and not t.startswith("#")]
 
 def suggest_auto_tags(text: str):
-    t = normalize_text(text)
+    t    = normalize_text(text)
     toks = set(tokens(t))
     tags = set()
 
-    shopping_words = {
-        "buy", "bought", "groceries", "grocery", "milk", "bread", "eggs",
-        "vegetables", "fruits", "shop", "shopping", "rice", "sugar", "oil"
-    }
-
-    study_words = {
-        "exam", "paper", "viva", "assignment", "project", "lab", "practical",
-        "class", "study", "subject", "semester", "notes", "submission"
-    }
-
-    work_words = {
-        "meeting", "client", "office", "internship", "task", "deadline",
-        "work", "team", "call", "presentation"
-    }
-
-    personal_words = {
-        "birthday", "bday", "friend", "family", "mom", "dad", "brother",
-        "sister", "home", "personal"
-    }
-
-    event_words = {
-        "today", "tomorrow", "monday", "tuesday", "wednesday", "thursday",
-        "friday", "saturday", "sunday", "jan", "feb", "mar", "apr", "may",
-        "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"
-    }
-
-    if toks & shopping_words:
+    if toks & {"buy","bought","groceries","grocery","milk","bread","eggs","vegetables","fruits","shop","shopping","rice","sugar","oil"}:
         tags.add("#shopping")
-
-    if toks & study_words:
+    if toks & {"exam","paper","viva","assignment","project","lab","practical","class","study","subject","semester","notes","submission"}:
         tags.add("#study")
-
-    if toks & work_words:
+    if toks & {"meeting","client","office","internship","task","deadline","work","team","call","presentation"}:
         tags.add("#work")
-
-    if toks & personal_words:
+    if toks & {"birthday","bday","friend","family","mom","dad","brother","sister","home","personal"}:
         tags.add("#personal")
-
-    if toks & event_words:
+    if toks & {"today","tomorrow","monday","tuesday","wednesday","thursday","friday","saturday","sunday","jan","feb","mar","apr","may","jun","jul","aug","sep","sept","oct","nov","dec"}:
         tags.add("#event")
-
     if re.search(r"\b\d{1,2}(?::\d{2})?\s*(am|pm)\b", t, re.I):
         tags.add("#event")
-
-    if re.search(r"\b\d{1,2}\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b", t, re.I):
+    if re.search(r"\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b", t, re.I):
         tags.add("#event")
 
     return list(tags)
 
 def extract_tags(text: str):
-    manual_tags = set(re.findall(r"#\w+", (text or "").lower()))
-    auto_tags = set(suggest_auto_tags(text))
-    all_tags = manual_tags | auto_tags
-    if not all_tags:
-        all_tags = {"#general"}
-    return sorted(list(all_tags))
+    manual = set(re.findall(r"#\w+", (text or "").lower()))
+    auto   = set(suggest_auto_tags(text))
+    all_tags = manual | auto
+    return sorted(all_tags) if all_tags else ["#general"]
 
 def token_overlap_score(q: str, doc: str) -> float:
-    qset = set(tokens(q))
-    dset = set(tokens(doc))
+    qset, dset = set(tokens(q)), set(tokens(doc))
     if not qset or not dset:
         return 0.0
     return len(qset & dset) / max(1, len(qset))
 
 def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     denom = np.linalg.norm(a) * np.linalg.norm(b)
-    if denom == 0:
-        return 0.0
-    return float(np.dot(a, b) / denom)
+    return float(np.dot(a, b) / denom) if denom else 0.0
 
 def today_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
@@ -174,47 +154,38 @@ def short_answer_from_text(question: str, text: str) -> str:
     t = (text or "").strip()
 
     time_match = re.search(r"\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b", t, re.I)
-    date_match = re.search(
-        r"\b(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*)\b",
-        t, re.I
-    )
+    date_match = re.search(r"\b(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*)\b", t, re.I)
 
     if "name" in q:
         m = re.search(r"(?:my\s+name\s+is|name\s+is)\s+(.+)$", t, re.I)
-        if m:
-            return m.group(1).strip()
-        m2 = re.search(r"\bname\s+([a-z][a-z\s]{2,})$", t, re.I)
-        if m2:
-            return m2.group(1).strip()
-        m3 = re.search(r"^(.+?)\s+is\s+my\s+name$", t, re.I)
-        if m3:
-            return m3.group(1).strip()
+        if m: return m.group(1).strip()
+        m = re.search(r"\bname\s+([a-z][a-z\s]{2,})$", t, re.I)
+        if m: return m.group(1).strip()
+        m = re.search(r"^(.+?)\s+is\s+my\s+name$", t, re.I)
+        if m: return m.group(1).strip()
 
-    if any(k in q for k in ["time", "timing", "open", "close", "kab", "when"]):
-        if time_match:
-            return time_match.group(1).strip()
-        if date_match:
-            return date_match.group(1).strip()
+    if any(k in q for k in ["time","timing","open","close","kab","when"]):
+        if time_match: return time_match.group(1).strip()
+        if date_match: return date_match.group(1).strip()
 
-    if any(k in q for k in ["birthday", "bday", "b'day"]):
-        if date_match:
-            return date_match.group(1).strip()
+    if any(k in q for k in ["birthday","bday","b'day"]):
+        if date_match: return date_match.group(1).strip()
 
-    if any(k in q for k in ["date", "exam", "paper", "viva", "submission"]):
-        if date_match:
-            return date_match.group(1).strip()
+    if any(k in q for k in ["date","exam","paper","viva","submission"]):
+        if date_match: return date_match.group(1).strip()
 
     return t
 
 def build_memory_payload(doc):
     return {
-        "id": str(doc["_id"]),
-        "text": doc.get("text", ""),
-        "tags": doc.get("tags", ["#general"]),
-        "date": doc.get("date", ""),
-        "pinned": doc.get("pinned", False)
+        "id":     str(doc["_id"]),
+        "text":   doc.get("text", ""),
+        "tags":   doc.get("tags", ["#general"]),
+        "date":   doc.get("date", ""),
+        "pinned": doc.get("pinned", False),
     }
 
+# ── Routes ─────────────────────────────────────────────────────────────────────
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
@@ -234,14 +205,11 @@ def logout(request: Request):
 async def login(request: Request, data: dict = Body(...)):
     username = normalize(data.get("username"))
     password = (data.get("password") or "").strip()
-
     if not username or not password:
         return JSONResponse({"ok": False, "msg": "Username & password required"})
-
     user = users_col.find_one({"username": username})
     if not user or not verify_password(password, user["passhash"]):
         return JSONResponse({"ok": False, "msg": "Invalid credentials ❌"})
-
     request.session["user"] = username
     return JSONResponse({"ok": True, "redirect": "/"})
 
@@ -249,13 +217,10 @@ async def login(request: Request, data: dict = Body(...)):
 async def signup(request: Request, data: dict = Body(...)):
     username = normalize(data.get("username"))
     password = (data.get("password") or "").strip()
-
     if not username or not password:
         return JSONResponse({"ok": False, "msg": "Username & password required"})
-
     if users_col.find_one({"username": username}):
         return JSONResponse({"ok": False, "msg": "Account already exists ⚠️"})
-
     users_col.insert_one({"username": username, "passhash": hash_password(password)})
     request.session["user"] = username
     return JSONResponse({"ok": True, "redirect": "/"})
@@ -275,7 +240,10 @@ async def chat(data: dict = Body(...), user=Depends(get_current_user)):
             return {"response": "Type a question 🙂"}
 
         q_norm = normalize_text(q)
-        q_vec = get_model().encode(q_norm)
+        try:
+            q_vec = get_model().encode(q_norm)
+        except Exception as e:
+            return {"response": f"Model error: {e}"}
 
         memories = list(mem_col.find({"user": user}, {"text": 1, "text_lower": 1, "embedding": 1, "date": 1}))
         if not memories:
@@ -283,23 +251,22 @@ async def chat(data: dict = Body(...), user=Depends(get_current_user)):
 
         scored = []
         for m in memories:
-            text = m.get("text") or ""
+            text       = m.get("text", "")
             text_lower = m.get("text_lower") or normalize_text(text)
-            emb = m.get("embedding")
-            date = m.get("date", "")
+            emb        = m.get("embedding")
+            date       = m.get("date", "")
 
             s_sem = 0.0
             if emb:
                 try:
                     s_sem = cosine_sim(q_vec, np.array(emb, dtype=float))
                 except Exception:
-                    s_sem = 0.0
+                    pass
 
-            s_lex = token_overlap_score(q_norm, text_lower)
-            s_sub = 1.0 if (q_norm and q_norm in text_lower) else 0.0
+            s_lex    = token_overlap_score(q_norm, text_lower)
+            s_sub    = 1.0 if (q_norm and q_norm in text_lower) else 0.0
             s_recent = 1.0 if date == today_str() else 0.0
-
-            final = (0.52 * s_sem) + (0.28 * s_lex) + (0.10 * s_sub) + (0.10 * s_recent)
+            final    = (0.52 * s_sem) + (0.28 * s_lex) + (0.10 * s_sub) + (0.10 * s_recent)
             scored.append((final, text))
 
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -309,24 +276,27 @@ async def chat(data: dict = Body(...), user=Depends(get_current_user)):
 
         return {"response": short_answer_from_text(q, scored[0][1])}
 
+    # ── Save memory ────────────────────────────────────────────────────────────
     msg = clean_memory_text(msg)
     if not msg:
         return {"response": "Type something 🙂"}
 
-    tags = extract_tags(msg)
+    tags       = extract_tags(msg)
     text_lower = normalize_text(msg)
-    emb = get_model().encode(text_lower).tolist()
+    try:
+        emb = get_model().encode(text_lower).tolist()
+    except Exception as e:
+        return {"response": f"Model error: {e}"}
 
     mem_col.insert_one({
-        "user": user,
-        "text": msg,
+        "user":       user,
+        "text":       msg,
         "text_lower": text_lower,
-        "embedding": emb,
-        "tags": tags,
-        "date": today_str(),
-        "pinned": False
+        "embedding":  emb,
+        "tags":       tags,
+        "date":       today_str(),
+        "pinned":     False,
     })
-
     return {"response": "Saved ✅"}
 
 @app.get("/all")
@@ -341,7 +311,6 @@ def tag_memories(tag: str, user=Depends(get_current_user)):
         return []
     if not t.startswith("#"):
         t = "#" + t
-
     rows = list(mem_col.find({"user": user, "tags": {"$in": [t]}}).sort([("pinned", -1), ("_id", -1)]))
     return [build_memory_payload(r) for r in rows]
 
@@ -358,14 +327,11 @@ def calendar(user=Depends(get_current_user)):
     rows = list(mem_col.find({"user": user}, {"date": 1}))
     if not rows:
         return {"calendar": "No calendar items"}
-
     counts = {}
     for r in rows:
         d = r.get("date", "unknown-date")
         counts[d] = counts.get(d, 0) + 1
-
-    items = sorted(counts.items())
-    lines = [f"• {d} → {cnt} memories" for d, cnt in items]
+    lines = [f"• {d} → {cnt} memories" for d, cnt in sorted(counts.items())]
     return {"calendar": "Calendar (saved date):\n" + "\n".join(lines)}
 
 @app.get("/search")
@@ -375,7 +341,6 @@ def search_memories(q: str = Query(..., min_length=1), user=Depends(get_current_
         return []
 
     q_norm = normalize_text(q)
-
     direct = list(mem_col.find(
         {"user": user, "text_lower": {"$regex": re.escape(q_norm), "$options": "i"}}
     ).sort([("pinned", -1), ("_id", -1)]).limit(50))
@@ -387,54 +352,42 @@ def search_memories(q: str = Query(..., min_length=1), user=Depends(get_current_
     if not memories:
         return []
 
-    q_vec = get_model().encode(q_norm)
-    scored = []
+    try:
+        q_vec = get_model().encode(q_norm)
+    except Exception:
+        return []
 
+    scored = []
     for m in memories:
-        text = m.get("text", "")
+        text       = m.get("text", "")
         text_lower = m.get("text_lower") or normalize_text(text)
-        date = m.get("date", "")
+        date       = m.get("date", "")
 
         s_lex = token_overlap_score(q_norm, text_lower)
         s_sub = 1.0 if (q_norm and q_norm in text_lower) else 0.0
-
         s_sem = 0.0
-        emb = m.get("embedding")
+        emb   = m.get("embedding")
         if emb:
             try:
                 s_sem = cosine_sim(q_vec, np.array(emb, dtype=float))
             except Exception:
-                s_sem = 0.0
+                pass
 
         s_recent = 1.0 if date == today_str() else 0.0
-        s_pin = 1.0 if m.get("pinned", False) else 0.0
-
-        final = (0.45 * s_sem) + (0.22 * s_lex) + (0.08 * s_sub) + (0.10 * s_recent) + (0.15 * s_pin)
+        s_pin    = 1.0 if m.get("pinned", False) else 0.0
+        final    = (0.45 * s_sem) + (0.22 * s_lex) + (0.08 * s_sub) + (0.10 * s_recent) + (0.15 * s_pin)
         scored.append((final, m))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-
-    out = []
-    for score, m in scored[:15]:
-        if score < 0.22:
-            continue
-        out.append(build_memory_payload(m))
-
-    return out
+    return [build_memory_payload(m) for score, m in scored[:15] if score >= 0.22]
 
 @app.put("/pin/{mem_id}")
 def toggle_pin(mem_id: str, user=Depends(get_current_user)):
     doc = mem_col.find_one({"user": user, "_id": ObjectId(mem_id)})
     if not doc:
         return {"ok": False, "msg": "Not found"}
-
     new_val = not doc.get("pinned", False)
-
-    mem_col.update_one(
-        {"user": user, "_id": ObjectId(mem_id)},
-        {"$set": {"pinned": new_val}}
-    )
-
+    mem_col.update_one({"user": user, "_id": ObjectId(mem_id)}, {"$set": {"pinned": new_val}})
     return {"ok": True, "pinned": new_val}
 
 @app.delete("/delete/{mem_id}")
@@ -448,21 +401,18 @@ def edit_memory(mem_id: str, data: dict = Body(...), user=Depends(get_current_us
     if not new_text:
         return {"ok": False, "msg": "Text required"}
 
-    new_text = clean_memory_text(new_text)
-    tags = extract_tags(new_text)
+    new_text   = clean_memory_text(new_text)
+    tags       = extract_tags(new_text)
     text_lower = normalize_text(new_text)
-    emb = get_model().encode(text_lower).tolist()
+    try:
+        emb = get_model().encode(text_lower).tolist()
+    except Exception as e:
+        return {"ok": False, "msg": f"Model error: {e}"}
+
     res = mem_col.update_one(
         {"user": user, "_id": ObjectId(mem_id)},
-        {"$set": {
-            "text": new_text,
-            "text_lower": text_lower,
-            "tags": tags,
-            "embedding": emb
-        }}
+        {"$set": {"text": new_text, "text_lower": text_lower, "tags": tags, "embedding": emb}}
     )
-
     if res.matched_count == 0:
         return {"ok": False, "msg": "Not found"}
-
     return {"ok": True, "msg": "Updated"}
