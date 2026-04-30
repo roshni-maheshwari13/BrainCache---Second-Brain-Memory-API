@@ -196,13 +196,15 @@ def build_memory_payload(doc):
 # ── Routes ─────────────────────────────────────────────────────────────────────
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    # Naye FastAPI ke hisaab se explicitly arguments pass karne hain
+    return templates.TemplateResponse(request=request, name="login.html", context={"request": request})
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login")
-    return templates.TemplateResponse("index.html", {"request": request, "user": request.session["user"]})
+    # Yahan bhi request, name aur context explicitly likhna hai
+    return templates.TemplateResponse(request=request, name="index.html", context={"request": request, "user": request.session["user"]})
 
 @app.get("/logout")
 def logout(request: Request):
