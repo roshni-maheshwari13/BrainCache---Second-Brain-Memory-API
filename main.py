@@ -14,6 +14,7 @@ import base64
 import hashlib
 import hmac
 import numpy as np
+import requests  # <-- NEW: API call ke liye
 from pathlib import Path
 from bson import ObjectId
 
@@ -47,19 +48,26 @@ db = client["secondbrain"]
 users_col = db["users"]
 mem_col   = db["memories"]
 
-# ── Sentence-transformer model (lazy, thread-safe) ─────────────────────────────
-model = None
+# ── Hugging Face API Setup (External AI) ───────────────────────────────────────
+HF_TOKEN = os.getenv("HF_TOKEN")
+# Same model we were using locally, but now on HF Servers
+API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/paraphrase-MiniLM-L3-v2"
 
-def get_model():
-    global model
-    if model is None:
-        from sentence_transformers import SentenceTransformer
-        hf_token = os.getenv("HF_TOKEN")          # set this in Render env vars
-        model = SentenceTransformer(
-            "paraphrase-MiniLM-L3-v2",
-            use_auth_token=hf_token if hf_token else False
-        )
-    return model
+def get_embedding(text: str) -> list:
+    if not HF_TOKEN:
+        raise ValueError("HF_TOKEN environment variable is not set in Render!")
+    
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    response = requests.post(API_URL, headers=headers, json={"inputs": [text]})
+    
+    if response.status_code == 200:
+        result = response.json()
+        # API returns a list inside a list for our text
+        if isinstance(result, list) and len(result) > 0:
+            return result[0]
+        return result
+    else:
+        raise Exception(f"HuggingFace API Error ({response.status_code}): {response.text}")
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
 def hash_password(password: str) -> str:
@@ -241,9 +249,9 @@ async def chat(data: dict = Body(...), user=Depends(get_current_user)):
 
         q_norm = normalize_text(q)
         try:
-            q_vec = get_model().encode(q_norm)
+            q_vec = get_embedding(q_norm)
         except Exception as e:
-            return {"response": f"Model error: {e}"}
+            return {"response": f"API connection error: {e}"}
 
         memories = list(mem_col.find({"user": user}, {"text": 1, "text_lower": 1, "embedding": 1, "date": 1}))
         if not memories:
@@ -259,7 +267,7 @@ async def chat(data: dict = Body(...), user=Depends(get_current_user)):
             s_sem = 0.0
             if emb:
                 try:
-                    s_sem = cosine_sim(q_vec, np.array(emb, dtype=float))
+                    s_sem = cosine_sim(np.array(q_vec, dtype=float), np.array(emb, dtype=float))
                 except Exception:
                     pass
 
@@ -284,9 +292,9 @@ async def chat(data: dict = Body(...), user=Depends(get_current_user)):
     tags       = extract_tags(msg)
     text_lower = normalize_text(msg)
     try:
-        emb = get_model().encode(text_lower).tolist()
+        emb = get_embedding(text_lower)
     except Exception as e:
-        return {"response": f"Model error: {e}"}
+        return {"response": f"API connection error: {e}"}
 
     mem_col.insert_one({
         "user":       user,
@@ -353,7 +361,7 @@ def search_memories(q: str = Query(..., min_length=1), user=Depends(get_current_
         return []
 
     try:
-        q_vec = get_model().encode(q_norm)
+        q_vec = get_embedding(q_norm)
     except Exception:
         return []
 
@@ -369,7 +377,7 @@ def search_memories(q: str = Query(..., min_length=1), user=Depends(get_current_
         emb   = m.get("embedding")
         if emb:
             try:
-                s_sem = cosine_sim(q_vec, np.array(emb, dtype=float))
+                s_sem = cosine_sim(np.array(q_vec, dtype=float), np.array(emb, dtype=float))
             except Exception:
                 pass
 
@@ -405,9 +413,9 @@ def edit_memory(mem_id: str, data: dict = Body(...), user=Depends(get_current_us
     tags       = extract_tags(new_text)
     text_lower = normalize_text(new_text)
     try:
-        emb = get_model().encode(text_lower).tolist()
+        emb = get_embedding(text_lower)
     except Exception as e:
-        return {"ok": False, "msg": f"Model error: {e}"}
+        return {"ok": False, "msg": f"API connection error: {e}"}
 
     res = mem_col.update_one(
         {"user": user, "_id": ObjectId(mem_id)},
