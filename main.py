@@ -50,8 +50,8 @@ mem_col   = db["memories"]
 
 # ── Hugging Face API Setup (External AI) ───────────────────────────────────────
 HF_TOKEN = os.getenv("HF_TOKEN")
-# Same model we were using locally, but now on HF Servers
-API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/paraphrase-MiniLM-L3-v2"
+# Updated to a more reliable model and correct API endpoint
+API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
 
 def get_embedding(text: str) -> list:
     if not HF_TOKEN:
