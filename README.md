@@ -31,18 +31,18 @@ BrainCache addresses this problem using AI and NLP-based semantic search, enabli
 
 ## How to Run Locally  
 
-1. Clone the repository  
+**1. Clone the repository** 
 git clone https://github.com/roshni-maheshwari13/BrainCache---Second-Brain-Memory-API.git  
 cd BrainCache---Second-Brain-Memory-API  
 
-2. Install dependencies  
+**2. Install dependencies** 
 pip install -r requirements.txt  
 
-3. Setup Environment Variables (.env)  
+**3. Setup Environment Variables (.env)**  
 MONGO_URI=your_mongodb_connection_string  
 HUGGINGFACE_API_KEY=your_huggingface_token  
 
-4. Run the server  
+**4. Run the server**  
 uvicorn main:app --reload  
 
 ## Features  
