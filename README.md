@@ -25,7 +25,7 @@ BrainCache addresses this problem using AI and NLP-based semantic search, enabli
 
 ## Tech Stack  
 Backend: Python, FastAPI  
-Database: MongoDB  
+Database: MongoDB   
 Frontend: HTML, CSS, JavaScript  
 AI & NLP: Sentence Transformers (via Hugging Face Inference API for scalable and memory-efficient deployment)  
 
