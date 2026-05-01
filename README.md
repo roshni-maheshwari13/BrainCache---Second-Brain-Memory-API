@@ -2,8 +2,6 @@
 ### 👩‍💻 Developed by Roshni Maheshwari  
 🔗 Live Demo: https://braincache-second-brain-memory-api.onrender.com  
 
----
-
 ## Project Overview  
 In today’s digital era, individuals manage a large amount of personal information such as notes, ideas, and tasks. However, retrieving this information efficiently remains a major challenge.  
 
