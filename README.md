@@ -1,4 +1,4 @@
-# 🧠 BrainCache – Second Brain Memory System  
+# BrainCache – Second Brain Memory System  
 ### 👩‍💻 Developed by Roshni Maheshwari  
 🔗 Live Demo: https://braincache-second-brain-memory-api.onrender.com  
 
@@ -24,10 +24,10 @@ BrainCache addresses this problem using AI and NLP-based semantic search, enabli
 - User Session Management  
 
 ## Tech Stack  
-Backend: Python, FastAPI  
-Database: MongoDB   
-Frontend: HTML, CSS, JavaScript  
-AI & NLP: Sentence Transformers (via Hugging Face Inference API for scalable and memory-efficient deployment)  
+**Backend:** Python, FastAPI  
+**Database:** MongoDB   
+**Frontend:** HTML, CSS, JavaScript  
+**AI & NLP:** Sentence Transformers (via Hugging Face Inference API for scalable and memory-efficient deployment)  
 
 ## How to Run Locally  
 
